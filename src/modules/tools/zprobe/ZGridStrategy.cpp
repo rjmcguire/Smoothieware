@@ -23,6 +23,9 @@
 
        leveling-strategy.ZGrid-leveling.bed_z           20
 
+    Configre for Machines with bed 0:0 at center of platform
+       leveling-strategy.ZGrid-leveling.bed_zero        false
+
 
     The number of divisions for X and Y should be defined
 
@@ -96,6 +99,7 @@
 #define slow_feedrate_checksum       CHECKSUM("slow_feedrate")
 #define probe_offsets_checksum       CHECKSUM("probe_offsets")
 #define wait_for_probe_checksum      CHECKSUM("wait_for_probe")
+#define center_zero_checksum         CHECKSUM("center_zero")
 
 #define cols_checksum                CHECKSUM("cols")
 #define rows_checksum                CHECKSUM("rows")
@@ -132,6 +136,8 @@ bool ZGridStrategy::handleConfig()
     this->numCols = THEKERNEL->config->value(leveling_strategy_checksum, ZGrid_leveling_checksum, cols_checksum)->by_default(5)->as_number();
 
     this->wait_for_probe = THEKERNEL->config->value(leveling_strategy_checksum, ZGrid_leveling_checksum, wait_for_probe_checksum)->by_default(false)->as_bool();
+
+    this->center_zero = THEKERNEL->config->value(leveling_strategy_checksum, ZGrid_leveling_checksum, center_zero_checksum)->by_default(false)->as_bool();
 
 
     // Probe offsets xxx,yyy,zzz

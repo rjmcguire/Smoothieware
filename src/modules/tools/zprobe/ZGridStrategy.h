@@ -54,6 +54,7 @@ private:
     float cal[3];            // calibration positions for manual leveling
     struct {
         bool in_cal:1;
+        bool center_zero:1;
     };
 };
 

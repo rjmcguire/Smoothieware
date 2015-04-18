@@ -24,6 +24,9 @@
 #define morgan_undefined_min_checksum CHECKSUM("morgan_undefined_min")
 #define morgan_undefined_max_checksum CHECKSUM("morgan_undefined_max")
 
+#define morgan_center_zero            CHECKSUM("morgan_center_zero")
+
+
 #define SQ(x) powf(x, 2)
 #define ROUND(x, y) (roundf(x * 1e ## y) / 1e ## y)
 

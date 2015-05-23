@@ -60,6 +60,8 @@
 #define disable_leds_checksum  CHECKSUM("leds_disable")
 #define dfu_enable_checksum  CHECKSUM("dfu_enable")
 
+#define DISABLEMSD
+
 // Watchdog wd(5000000, WDT_MRI);
 
 // USB Stuff

@@ -721,24 +721,24 @@ void Robot::process_move(Gcode *gcode)
     }
 
 
-            // Software limits : Limit the castesian movement to:
-            //   ** if last_milestone is within build area limits : the limits of the build area
-            //   ** if last_milestone is outside build area limits (after homing etc.) : no further away from build environment than the last_milestone
+    // Software limits : Limit the castesian movement to:
+    //   ** if last_milestone is within build area limits : the limits of the build area
+    //   ** if last_milestone is outside build area limits (after homing etc.) : no further away from build environment than the last_milestone
 
-    for(char letter = 'X'; letter <= 'Z'; letter++) {
-       if (this->software_limits == true) {
+    if (this->software_limits == true) {
+       for(char letter = 'X'; letter <= 'Z'; letter++) {
           if (target[letter - 'X'] < this->softlimits[letter - 'X'][0]){
              if (target[letter - 'X'] < this->last_milestone[letter - 'X']){
-                      target[letter - 'X'] = (this->last_milestone[letter - 'X'] < this->softlimits[letter - 'X'][0])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][0];
-                   }
-               }
-               if (target[letter - 'X'] > this->softlimits[letter - 'X'][1]){
-                  if (target[letter - 'X'] > this->last_milestone[letter - 'X']){
-                     target[letter - 'X'] = (this->last_milestone[letter - 'X'] > this->softlimits[letter - 'X'][1])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][1];
-                  }
-               }
-            }
-        }
+                target[letter - 'X'] = (this->last_milestone[letter - 'X'] < this->softlimits[letter - 'X'][0])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][0];
+             }
+          }
+          if (target[letter - 'X'] > this->softlimits[letter - 'X'][1]){
+             if (target[letter - 'X'] > this->last_milestone[letter - 'X']){
+                target[letter - 'X'] = (this->last_milestone[letter - 'X'] > this->softlimits[letter - 'X'][1])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][1];
+             }
+          }
+       }
+    }
 
 
     if( gcode->has_letter('F') ) {

@@ -26,6 +26,7 @@
 #include "PublicData.h"
 #include "LevelingStrategy.h"
 #include "StepTicker.h"
+#include "utils.h"
 
 // strategies we know about
 #include "DeltaCalibrationStrategy.h"
@@ -343,20 +344,20 @@ void ZProbe::on_gcode_received(void *argument)
             }
         }
 
-    } else if(gcode->has_g && gcode->g == 38 ) { // G38.2 Straight Probe
+    } else if(gcode->has_g && gcode->g == 38 ) { // G38.2 Straight Probe with error, G38.3 straight probe without error
         // linuxcnc/grbl style probe http://www.linuxcnc.org/docs/2.5/html/gcode/gcode.html#sec:G38-probe
         if(gcode->subcode != 2 && gcode->subcode != 3) {
-            gcode->stream->printf("ERROR: Only G38.2 and G38.3 are supported\n");
+            gcode->stream->printf("error:Only G38.2 and G38.3 are supported\n");
             return;
         }
 
         // make sure the probe is defined and not already triggered before moving motors
         if(!this->pin.connected()) {
-            gcode->stream->printf("ZProbe not connected.\n");
+            gcode->stream->printf("error:ZProbe not connected.\n");
             return;
         }
         if(this->pin.get()) {
-            gcode->stream->printf("ZProbe triggered before move, aborting command.\n");
+            gcode->stream->printf("error:ZProbe triggered before move, aborting command.\n");
             return;
         }
 
@@ -365,11 +366,11 @@ void ZProbe::on_gcode_received(void *argument)
 
         if(gcode->has_letter('X')) {
             // probe in the X axis
-            gcode->stream->printf("Not currently supported.\n");
+            probe_XY(gcode, X_AXIS);
 
         }else if(gcode->has_letter('Y')) {
             // probe in the Y axis
-            gcode->stream->printf("Not currently supported.\n");
+            probe_XY(gcode, Y_AXIS);
 
         }else if(gcode->has_letter('Z')) {
             // we need to know where we started the probe from
@@ -382,17 +383,32 @@ void ZProbe::on_gcode_received(void *argument)
             bool probe_result = run_probe_feed(steps, rate, gcode->get_value('Z'));
 
             if(probe_result) {
-                gcode->stream->printf("INFO: delta Z %1.4f (Steps %d)\n", steps / Z_STEPS_PER_MM, steps);
+                float z= current_machine_pos[Z_AXIS] - zsteps_to_mm(steps);
+                if(THEKERNEL->is_grbl_mode()) {
+                    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:1]\n", current_machine_pos[X_AXIS], current_machine_pos[Y_AXIS], z);
+
+                }else{
+                    gcode->stream->printf("INFO: delta Z %1.4f (Steps %d)\n", steps / Z_STEPS_PER_MM, steps);
+                }
 
                 // set position to where it stopped
-                THEKERNEL->robot->reset_axis_position(current_machine_pos[Z_AXIS] - zsteps_to_mm(steps), Z_AXIS);
+                THEKERNEL->robot->reset_axis_position(z, Z_AXIS);
 
             } else {
-                gcode->stream->printf("ERROR: ZProbe not triggered\n");
+                if(THEKERNEL->is_grbl_mode()) {
+                    if(gcode->subcode == 2) {
+                        gcode->stream->printf("ALARM:Probe fail\n");
+                        THEKERNEL->call_event(ON_HALT, nullptr);
+                    }
+                    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:0]\n", current_machine_pos[X_AXIS], current_machine_pos[Y_AXIS], current_machine_pos[Z_AXIS]);
+
+                }else{
+                    gcode->stream->printf("error:ZProbe not triggered\n");
+                }
             }
 
         }else{
-            gcode->stream->printf("ERROR: at least one of X Y or Z must be specified\n");
+            gcode->stream->printf("error:at least one of X Y or Z must be specified\n");
 
         }
         return;
@@ -430,6 +446,65 @@ void ZProbe::on_gcode_received(void *argument)
                 }
         }
     }
+}
+
+// special way to probe in the X or Y direction
+void ZProbe::probe_XY(Gcode *gcode, int axis)
+{
+    // enable the probe checking in the stepticker
+    THEKERNEL->step_ticker->probe_fnc= [this]() { return this->pin.get(); };
+
+    // get probe feedrate if specified
+    float rate = (gcode->has_letter('F')) ? gcode->get_value('F')*60 : this->slow_feedrate;
+
+     // do a regular move which will stop as soon as the probe is triggered, or the distance is reached
+    if(axis == X_AXIS) {
+        coordinated_move(gcode->get_value('X'), 0, 0, rate, true);
+
+    }else if(axis == Y_AXIS) {
+        coordinated_move(0, gcode->get_value('Y'), 0, rate, true);
+
+    }else{
+        // this is an error
+        THEKERNEL->step_ticker->probe_fnc= nullptr;
+        return;
+    }
+
+    // now wait for the move to finish
+    THEKERNEL->conveyor->wait_for_empty_queue();
+
+    float pos[3];
+    {
+        // get the current position
+        ActuatorCoordinates current_position{
+            THEKERNEL->robot->actuators[X_AXIS]->get_current_position(),
+            THEKERNEL->robot->actuators[Y_AXIS]->get_current_position(),
+            THEKERNEL->robot->actuators[Z_AXIS]->get_current_position()
+        };
+
+        // get machine position from the actuator position using FK
+        THEKERNEL->robot->arm_solution->actuator_to_cartesian(current_position, pos);
+    }
+
+    // see if probe was triggered
+    // handle debounce here, 200ms should be enough
+    safe_delay(200);
+    int probeok= this->pin.get() ? 1 : 0;
+
+    // print results
+    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], probeok);
+
+    if(!probeok && gcode->subcode == 2) {
+        // issue error if probe was not triggered and subcode == 2
+        gcode->stream->printf("ALARM:Probe fail\n");
+        THEKERNEL->call_event(ON_HALT, nullptr);
+    }
+
+    // if the probe stopped the move we need to correct the last_milestone as it did not reach where it thought
+    THEKERNEL->robot->reset_position_from_current_actuator_position();
+
+    // disable probe checking
+    THEKERNEL->step_ticker->probe_fnc= nullptr;
 }
 
 // Called periodically to change the speed to match acceleration

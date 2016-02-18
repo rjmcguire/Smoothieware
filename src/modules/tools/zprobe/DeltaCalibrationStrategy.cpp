@@ -92,6 +92,15 @@ static std::tuple<float, float, float, float, float, float> getCoordinates(float
 // Probes the 7 points on a delta can be used for off board calibration
 bool DeltaCalibrationStrategy::probe_delta_points(Gcode *gcode)
 {
+    float bedht= findBed();
+    if(isnan(bedht)) return false;
+
+    gcode->stream->printf("initial Bed ht is %f mm\n", bedht);
+
+    // move to start position
+    zprobe->home();
+    zprobe->coordinated_move(NAN, NAN, -bedht, zprobe->getFastFeedrate(), true); // do a relative move from home to the point above the bed
+
     // get probe points
     float t1x, t1y, t2x, t2y, t3x, t3y;
     std::tie(t1x, t1y, t2x, t2y, t3x, t3y) = getCoordinates(this->probe_radius);
@@ -318,6 +327,7 @@ bool DeltaCalibrationStrategy::calibrate_delta_radius(Gcode *gcode)
     }
     options.clear();
 
+    bool good= false;
     float drinc = 2.5F; // approx
     for (int i = 1; i <= 10; ++i) {
         // probe t1, t2, t3 and get average, but use coordinated moves, probing center won't change
@@ -334,7 +344,10 @@ bool DeltaCalibrationStrategy::calibrate_delta_radius(Gcode *gcode)
         float d = cmm - m;
         gcode->stream->printf("C-%d Z-ave:%1.4f delta: %1.3f\n", i, m, d);
 
-        if(abs(d) <= target) break; // resolution of success
+        if(abs(d) <= target){
+            good= true;
+            break; // resolution of success
+        }
 
         // increase delta radius to adjust for low center
         // decrease delta radius to adjust for high center
@@ -351,6 +364,11 @@ bool DeltaCalibrationStrategy::calibrate_delta_radius(Gcode *gcode)
         // flush the output
         THEKERNEL->call_event(ON_IDLE);
     }
+
+    if(!good) {
+        gcode->stream->printf("WARNING: delta radius did not resolve to within required parameters: %f\n", target);
+    }
+
     return true;
 }
 

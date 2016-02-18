@@ -42,6 +42,7 @@ class Endstops : public Module{
         uint8_t homing_order;
         std::bitset<3> home_direction;
         std::bitset<3> limit_enable;
+        float saved_position[3]{0}; // save G28 (in grbl mode)
 
         unsigned int  debounce_count;
         float  retract_mm[3];
@@ -53,6 +54,7 @@ class Endstops : public Module{
         struct {
             bool is_corexy:1;
             bool is_delta:1;
+            bool is_rdelta:1;
             bool is_scara:1;
             bool move_to_origin_after_home:1;
             uint8_t bounce_cnt:4;

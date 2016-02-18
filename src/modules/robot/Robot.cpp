@@ -27,7 +27,7 @@ using std::string;
 #include "arm_solutions/CartesianSolution.h"
 #include "arm_solutions/RotatableCartesianSolution.h"
 #include "arm_solutions/LinearDeltaSolution.h"
-#include "arm_solutions/RotatableDeltaSolution.h"
+#include "arm_solutions/RotaryDeltaSolution.h"
 #include "arm_solutions/HBotSolution.h"
 #include "arm_solutions/CoreXZSolution.h"
 #include "arm_solutions/MorganSCARASolution.h"
@@ -57,7 +57,7 @@ using std::string;
 #define  rotatable_cartesian_checksum        CHECKSUM("rotatable_cartesian")
 #define  rostock_checksum                    CHECKSUM("rostock")
 #define  linear_delta_checksum               CHECKSUM("linear_delta")
-#define  rotatable_delta_checksum            CHECKSUM("rotatable_delta")
+#define  rotary_delta_checksum               CHECKSUM("rotary_delta")
 #define  delta_checksum                      CHECKSUM("delta")
 #define  hbot_checksum                       CHECKSUM("hbot")
 #define  corexy_checksum                     CHECKSUM("corexy")
@@ -168,8 +168,8 @@ void Robot::load_config()
     } else if(solution_checksum == rotatable_cartesian_checksum) {
         this->arm_solution = new RotatableCartesianSolution(THEKERNEL->config);
 
-    } else if(solution_checksum == rotatable_delta_checksum) {
-        this->arm_solution = new RotatableDeltaSolution(THEKERNEL->config);
+    } else if(solution_checksum == rotary_delta_checksum) {
+        this->arm_solution = new RotaryDeltaSolution(THEKERNEL->config);
 
     } else if(solution_checksum == morgan_checksum) {
         this->arm_solution = new MorganSCARASolution(THEKERNEL->config);
@@ -460,6 +460,7 @@ void Robot::on_gcode_received(void *argument)
     } else if( gcode->has_m) {
         switch( gcode->m ) {
             case 2: // M2 end of program
+            case 30: // M30 end of program
                 current_wcs = 0;
                 absolute_mode = true;
                 break;
@@ -803,6 +804,19 @@ void Robot::reset_axis_position(float position, int axis)
     reset_axis_position(last_milestone[X_AXIS], last_milestone[Y_AXIS], last_milestone[Z_AXIS]);
 }
 
+// similar to reset_actuator_position but directly sets the actuator positions in actuators units (eg mm for cartesian, degrees for rotary delta)
+// then sets the axis postions to match. currently only called from G28.4 in Endstops.cpp
+void Robot::reset_actuator_position(float a, float b, float c)
+{
+    // NOTE this does NOT support the multiple actuator HACK. so if there are more than 3 actuators this will probably not work
+    if(!isnan(a)) actuators[0]->change_last_milestone(a);
+    if(!isnan(b)) actuators[1]->change_last_milestone(b);
+    if(!isnan(c)) actuators[2]->change_last_milestone(c);
+
+    // now correct axis positions then recorrect actuator to account for rounding
+    reset_position_from_current_actuator_position();
+}
+
 // Use FK to find out where actuator is and reset to match
 void Robot::reset_position_from_current_actuator_position()
 {
@@ -819,7 +833,7 @@ void Robot::reset_position_from_current_actuator_position()
 
     // now reset actuator::last_milestone, NOTE this may lose a little precision as FK is not always entirely accurate.
     // NOTE This is required to sync the machine position with the actuator position, we do a somewhat redundant cartesian_to_actuator() call
-    // to get everything in perfect sync.
+    // to get everything in perfect sync. **This IS required as there is rounding to the next step as steps are integer**
     arm_solution->cartesian_to_actuator(last_machine_position, actuator_pos);
     for (size_t i = 0; i < actuators.size(); i++)
         actuators[i]->change_last_milestone(actuator_pos[i]);

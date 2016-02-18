@@ -93,6 +93,13 @@ void StepperMotor::step()
     }
 }
 
+void StepperMotor::force_finish_move()
+{
+    this->is_move_finished = true;
+    THEKERNEL->step_ticker->a_move_finished= true;
+    this->last_step_tick= THEKERNEL->step_ticker->get_tick_cnt(); // remember when last step was
+    this->steps_to_move= this->stepped;
+}
 
 // If the move is finished, the StepTicker will call this ( because we asked it to in tick() )
 void StepperMotor::signal_move_finished()
@@ -190,19 +197,19 @@ StepperMotor* StepperMotor::set_speed( float speed )
 void StepperMotor::change_steps_per_mm(float new_steps)
 {
     steps_per_mm = new_steps;
-    last_milestone_steps = lround(last_milestone_mm * steps_per_mm);
+    last_milestone_steps = lroundf(last_milestone_mm * steps_per_mm);
     current_position_steps = last_milestone_steps;
 }
 
 void StepperMotor::change_last_milestone(float new_milestone)
 {
     last_milestone_mm = new_milestone;
-    last_milestone_steps = lround(last_milestone_mm * steps_per_mm);
+    last_milestone_steps = lroundf(last_milestone_mm * steps_per_mm);
     current_position_steps = last_milestone_steps;
 }
 
 int  StepperMotor::steps_to_target(float target)
 {
-    int target_steps = lround(target * steps_per_mm);
+    int target_steps = lroundf(target * steps_per_mm);
     return target_steps - last_milestone_steps;
 }

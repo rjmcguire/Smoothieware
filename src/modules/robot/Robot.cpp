@@ -128,6 +128,7 @@ Robot::Robot()
     this->wcs_offsets.fill(wcs_t(0.0F, 0.0F, 0.0F));
     this->g92_offset = wcs_t(0.0F, 0.0F, 0.0F);
     this->next_command_is_MCS = false;
+    this->disable_segmentation= false;
 }
 
 //Called when the module has just been loaded
@@ -804,8 +805,8 @@ void Robot::reset_axis_position(float position, int axis)
     reset_axis_position(last_milestone[X_AXIS], last_milestone[Y_AXIS], last_milestone[Z_AXIS]);
 }
 
-// similar to reset_actuator_position but directly sets the actuator positions in actuators units (eg mm for cartesian, degrees for rotary delta)
-// then sets the axis postions to match. currently only called from G28.4 in Endstops.cpp
+// similar to reset_axis_position but directly sets the actuator positions in actuators units (eg mm for cartesian, degrees for rotary delta)
+// then sets the axis postions to match. currently only called from G28.4 and M306 in Endstops.cpp
 void Robot::reset_actuator_position(float a, float b, float c)
 {
     // NOTE this does NOT support the multiple actuator HACK. so if there are more than 3 actuators this will probably not work
@@ -833,7 +834,7 @@ void Robot::reset_position_from_current_actuator_position()
 
     // now reset actuator::last_milestone, NOTE this may lose a little precision as FK is not always entirely accurate.
     // NOTE This is required to sync the machine position with the actuator position, we do a somewhat redundant cartesian_to_actuator() call
-    // to get everything in perfect sync. **This IS required as there is rounding to the next step as steps are integer**
+    // to get everything in perfect sync.
     arm_solution->cartesian_to_actuator(last_machine_position, actuator_pos);
     for (size_t i = 0; i < actuators.size(); i++)
         actuators[i]->change_last_milestone(actuator_pos[i]);
@@ -941,7 +942,10 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s )
     // The latter is more efficient and avoids splitting fast long lines into very small segments, like initial z move to 0, it is what Johanns Marlin delta port does
     uint16_t segments;
 
-    if(this->delta_segments_per_second > 1.0F) {
+    if(this->disable_segmentation) {
+        segments= 1;
+
+    } else if(this->delta_segments_per_second > 1.0F) {
         // enabled if set to something > 1, it is set to 0.0 by default
         // segment based on current speed and requested segments per second
         // the faster the travel speed the fewer segments needed

@@ -142,11 +142,11 @@ void Endstops::on_module_loaded()
     THEKERNEL->step_ticker->register_acceleration_tick_handler([this]() {acceleration_tick(); });
 
     // Settings
-    this->on_config_reload(this);
+    this->load_config();
 }
 
 // Get config
-void Endstops::on_config_reload(void *argument)
+void Endstops::load_config()
 {
     this->pins[0].from_string( THEKERNEL->config->value(alpha_min_endstop_checksum          )->by_default("nc" )->as_string())->as_input();
     this->pins[1].from_string( THEKERNEL->config->value(beta_min_endstop_checksum           )->by_default("nc" )->as_string())->as_input();
@@ -201,7 +201,7 @@ void Endstops::on_config_reload(void *argument)
     // see if an order has been specified, must be three characters, XYZ or YXZ etc
     string order = THEKERNEL->config->value(homing_order_checksum)->by_default("")->as_string();
     this->homing_order = 0;
-    if(order.size() == 3 && !this->is_delta) {
+    if(order.size() == 3 && !(this->is_delta || this->is_rdelta)) {
         int shift = 0;
         for(auto c : order) {
             uint8_t i = toupper(c) - 'X';
@@ -230,7 +230,7 @@ void Endstops::on_config_reload(void *argument)
 
     if(this->limit_enable[X_AXIS] || this->limit_enable[Y_AXIS] || this->limit_enable[Z_AXIS]) {
         register_for_event(ON_IDLE);
-        if(this->is_delta) {
+        if(this->is_delta || this->is_rdelta) {
             // we must enable all the limits not just one
             this->limit_enable[X_AXIS] = true;
             this->limit_enable[Y_AXIS] = true;
@@ -344,12 +344,12 @@ void Endstops::back_off_home(char axes_to_move)
         char gcode_buf[64];
         append_parameters(gcode_buf, params, sizeof(gcode_buf));
         Gcode gc(gcode_buf, &(StreamOutput::NullStream));
-        bool oldmode = THEKERNEL->robot->absolute_mode;
+        THEKERNEL->robot->push_state();
         THEKERNEL->robot->absolute_mode = false; // needs to be relative mode
         THEKERNEL->robot->on_gcode_received(&gc); // send to robot directly
-        THEKERNEL->robot->absolute_mode = oldmode; // restore mode
         // Wait for above to finish
         THEKERNEL->conveyor->wait_for_empty_queue();
+        THEKERNEL->robot->pop_state();
     }
 
     this->status = NOT_HOMING;
@@ -368,12 +368,14 @@ void Endstops::move_to_origin(char axes_to_move)
     float rate = std::min(this->fast_rates[0], this->fast_rates[1]) * 60.0F;
     char buf[32];
     snprintf(buf, sizeof(buf), "G53 G0 X0 Y0 F%1.4f", rate); // must use machine coordinates in case G92 or WCS is in effect
+    THEKERNEL->robot->push_state();
     struct SerialMessage message;
     message.message = buf;
     message.stream = &(StreamOutput::NullStream);
     THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message ); // as it is a multi G code command
     // Wait for above to finish
     THEKERNEL->conveyor->wait_for_empty_queue();
+    THEKERNEL->robot->pop_state();
     this->status = NOT_HOMING;
 }
 
@@ -648,12 +650,12 @@ void Endstops::process_home_command(Gcode* gcode)
         return;
 
     } else if(gcode->subcode == 4) { // G28.4 is a smoothie special it sets manual homing based on the actuator position (used for rotary delta)
-        // do a manual homing based on given coordinates, no endstops required
-        float a = NAN, b = NAN, c = NAN;
-        if(gcode->has_letter('A')) a =  gcode->get_value('A');
-        if(gcode->has_letter('B')) b =  gcode->get_value('B');
-        if(gcode->has_letter('C')) c =  gcode->get_value('C');
-        THEKERNEL->robot->reset_actuator_position(a, b, c);
+        // do a manual homing based on given coordinates, no endstops required, NOTE does not support the multi actuator hack
+        ActuatorCoordinates ac;
+        if(gcode->has_letter('A')) ac[0] =  gcode->get_value('A');
+        if(gcode->has_letter('B')) ac[1] =  gcode->get_value('B');
+        if(gcode->has_letter('C')) ac[2] =  gcode->get_value('C');
+        THEKERNEL->robot->reset_actuator_position(ac);
         return;
 
     } else if(THEKERNEL->is_grbl_mode()) {
@@ -668,13 +670,22 @@ void Endstops::process_home_command(Gcode* gcode)
 
     // Do we move select axes or all of them
     char axes_to_move = 0;
-    // only enable homing if the endstop is defined, deltas, scaras always home all axis
-    bool home_all = this->is_delta || this->is_rdelta || this->is_scara || !( gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z') );
 
-    for ( int c = X_AXIS; c <= Z_AXIS; c++ ) {
-        if ( (home_all || gcode->has_letter(c + 'X')) && this->pins[c + (this->home_direction[c] ? 0 : 3)].connected() ) {
-            axes_to_move += ( 1 << c );
+    // deltas, scaras always home all axis
+    bool home_all = this->is_delta || this->is_rdelta || this->is_scara;
+
+    if(!home_all) { // ie not a delta
+        bool axis_speced= ( gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z') );
+        // only enable homing if the endstop is defined,
+        for ( int c = X_AXIS; c <= Z_AXIS; c++ ) {
+            if (this->pins[c + (this->home_direction[c] ? 0 : 3)].connected() && (!axis_speced || gcode->has_letter(c + 'X')) ) {
+                axes_to_move += ( 1 << c );
+            }
         }
+
+    }else{
+        // all axis must move (and presumed defined)
+        axes_to_move= 7;
     }
 
     // save current actuator position so we can report how far we moved
@@ -753,7 +764,8 @@ void Endstops::process_home_command(Gcode* gcode)
             // without endstop trim, real_position == ideal_position
             if(is_rdelta) {
                 // with a rotary delta we set the actuators angle then use the FK to calculate the resulting cartesian coordinates
-                THEKERNEL->robot->reset_actuator_position(ideal_position[0], ideal_position[1], ideal_position[2]);
+                ActuatorCoordinates real_actuator_position = {ideal_position[0], ideal_position[1], ideal_position[2]};
+                THEKERNEL->robot->reset_actuator_position(real_actuator_position);
 
             } else {
                 // Reset the actuator positions to correspond our real position
@@ -786,6 +798,118 @@ void Endstops::process_home_command(Gcode* gcode)
     }
 }
 
+void Endstops::set_homing_offset(Gcode *gcode)
+{
+    // Similar to M206 and G92 but sets Homing offsets based on current position
+    float cartesian[3];
+    THEKERNEL->robot->get_axis_position(cartesian);    // get actual position from robot
+    if (gcode->has_letter('X')) {
+        home_offset[0] -= (cartesian[X_AXIS] - gcode->get_value('X'));
+        THEKERNEL->robot->reset_axis_position(gcode->get_value('X'), X_AXIS);
+    }
+    if (gcode->has_letter('Y')) {
+        home_offset[1] -= (cartesian[Y_AXIS] - gcode->get_value('Y'));
+        THEKERNEL->robot->reset_axis_position(gcode->get_value('Y'), Y_AXIS);
+    }
+    if (gcode->has_letter('Z')) {
+        home_offset[2] -= (cartesian[Z_AXIS] - gcode->get_value('Z'));
+        THEKERNEL->robot->reset_axis_position(gcode->get_value('Z'), Z_AXIS);
+    }
+
+    gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f\n", home_offset[0], home_offset[1], home_offset[2]);
+}
+
+void Endstops::set_relative_homing_offset(Gcode *gcode)
+{
+    // Similar to M306 but sets Homing offsets relatively based on current position
+    // Can be used in on the fly XYZ calibration during printing.
+    float cartesian[3];
+    std::vector<std::pair<char, float>> params;
+
+    THEKERNEL->robot->get_axis_position(cartesian);    // get actual position from robot
+
+    if (gcode->has_letter('X')) {
+        home_offset[0] -= gcode->get_value('X');
+        params.push_back({'X', gcode->get_value('X')});
+    }
+
+    if (gcode->has_letter('Y')) {
+        home_offset[1] -= gcode->get_value('Y');
+        params.push_back({'Y', gcode->get_value('Y')});
+    }
+
+    if (gcode->has_letter('Z')) {
+        home_offset[2] -= gcode->get_value('Z');
+        params.push_back({'Z', gcode->get_value('Z')});
+    }
+
+
+        // Do an axis move in the magnitude of the calibration value, without changing the current actual position
+    if(!params.empty()) {
+        params.insert(params.begin(), {'G', 0});
+        // use X slow rate to move, Z should have a max speed set anyway
+        params.push_back({'F', this->slow_rates[X_AXIS] * 60.0F});
+        char gcode_buf[64];
+        append_parameters(gcode_buf, params, sizeof(gcode_buf));
+        Gcode gc(gcode_buf, &(StreamOutput::NullStream));
+        THEKERNEL->robot->push_state();
+        THEKERNEL->robot->absolute_mode = false; // needs to be relative mode
+        THEKERNEL->robot->on_gcode_received(&gc); // send to robot directly
+        // Wait for above to finish
+        THEKERNEL->conveyor->wait_for_empty_queue();
+        THEKERNEL->robot->pop_state();
+    }
+
+
+    for (int i = X_AXIS; i <= Z_AXIS; i++) {  // Reset actual position to the initial values.
+      if (gcode->has_letter('X'+i))
+        THEKERNEL->robot->reset_axis_position(cartesian[i], i);
+    }
+
+    gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f\n", home_offset[0], home_offset[1], home_offset[2]);
+}
+
+/*void Endstops::back_off_home(char axes_to_move)
+{
+    std::vector<std::pair<char, float>> params;
+    this->status = BACK_OFF_HOME;
+
+    // these are handled differently
+    if(is_delta) {
+        // Move off of the endstop using a regular relative move in Z only
+        params.push_back({'Z', this->retract_mm[Z_AXIS] * (this->home_direction[Z_AXIS] ? 1 : -1)});
+
+    } else {
+        // cartesians, concatenate all the moves we need to do into one gcode
+        for( int c = X_AXIS; c <= Z_AXIS; c++ ) {
+            if( ((axes_to_move >> c ) & 1) == 0) continue; // only for axes we asked to move
+
+            // if not triggered no need to move off
+            if(this->limit_enable[c] && debounced_get(c + (this->home_direction[c] ? 0 : 3)) ) {
+                params.push_back({c + 'X', this->retract_mm[c] * (this->home_direction[c] ? 1 : -1)});
+            }
+        }
+    }
+
+    if(!params.empty()) {
+        // Move off of the endstop using a regular relative move
+        params.insert(params.begin(), {'G', 0});
+        // use X slow rate to move, Z should have a max speed set anyway
+        params.push_back({'F', this->slow_rates[X_AXIS] * 60.0F});
+        char gcode_buf[64];
+        append_parameters(gcode_buf, params, sizeof(gcode_buf));
+        Gcode gc(gcode_buf, &(StreamOutput::NullStream));
+        THEKERNEL->robot->push_state();
+        THEKERNEL->robot->absolute_mode = false; // needs to be relative mode
+        THEKERNEL->robot->on_gcode_received(&gc); // send to robot directly
+        // Wait for above to finish
+        THEKERNEL->conveyor->wait_for_empty_queue();
+        THEKERNEL->robot->pop_state();
+    }
+
+    this->status = NOT_HOMING;
+}*/
+
 // Start homing sequences by response to GCode commands
 void Endstops::on_gcode_received(void *argument)
 {
@@ -793,7 +917,7 @@ void Endstops::on_gcode_received(void *argument)
     if ( gcode->has_g && gcode->g == 28) {
         process_home_command(gcode);
 
-    }else if (gcode->has_m) {
+    } else if (gcode->has_m) {
 
         switch (gcode->m) {
             case 119: {
@@ -807,70 +931,22 @@ void Endstops::on_gcode_received(void *argument)
             break;
 
             case 206: // M206 - set homing offset
-                if(!is_rdelta) {
-                    if (gcode->has_letter('X')) home_offset[0] = gcode->get_value('X');
-                    if (gcode->has_letter('Y')) home_offset[1] = gcode->get_value('Y');
-                    if (gcode->has_letter('Z')) home_offset[2] = gcode->get_value('Z');
-                    gcode->stream->printf("X %5.3f Y %5.3f Z %5.3f\n", home_offset[0], home_offset[1], home_offset[2]);
+                if(is_rdelta) return; // RotaryDeltaCalibration module will handle this
 
-                } else {
-                    // set theta offset
-                    if (gcode->has_letter('A')) home_offset[0] = gcode->get_value('A');
-                    if (gcode->has_letter('B')) home_offset[1] = gcode->get_value('B');
-                    if (gcode->has_letter('C')) home_offset[2] = gcode->get_value('C');
-                    gcode->stream->printf("Theta offset A %8.5f B %8.5f C %8.5f\n", home_offset[0], home_offset[1], home_offset[2]);
-                }
+                if (gcode->has_letter('X')) home_offset[0] = gcode->get_value('X');
+                if (gcode->has_letter('Y')) home_offset[1] = gcode->get_value('Y');
+                if (gcode->has_letter('Z')) home_offset[2] = gcode->get_value('Z');
+                gcode->stream->printf("X %5.3f Y %5.3f Z %5.3f\n", home_offset[0], home_offset[1], home_offset[2]);
                 break;
 
-            case 306:
-                if(!is_rdelta) { // Similar to M206 and G92 but sets Homing offsets based on current position
-                    float cartesian[3];
-                    THEKERNEL->robot->get_axis_position(cartesian);    // get actual position from robot
-                    if (gcode->has_letter('X')) {
-                        home_offset[0] -= (cartesian[X_AXIS] - gcode->get_value('X'));
-                        THEKERNEL->robot->reset_axis_position(gcode->get_value('X'), X_AXIS);
-                    }
-                    if (gcode->has_letter('Y')) {
-                        home_offset[1] -= (cartesian[Y_AXIS] - gcode->get_value('Y'));
-                        THEKERNEL->robot->reset_axis_position(gcode->get_value('Y'), Y_AXIS);
-                    }
-                    if (gcode->has_letter('Z')) {
-                        home_offset[2] -= (cartesian[Z_AXIS] - gcode->get_value('Z'));
-                        THEKERNEL->robot->reset_axis_position(gcode->get_value('Z'), Z_AXIS);
-                    }
+            case 306: // set homing offset based on current position
+                if(is_rdelta) return; // RotaryDeltaCalibration module will handle this
 
-                    gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f\n", home_offset[0], home_offset[1], home_offset[2]);
-
-                } else {
-                    // for a rotary delta M306 calibrates the homing angle
-                    // by doing M306 A-56.17 it will calculate the M206 A value (the theta offset for actuator A) based on the difference
-                    // between what it thinks is the current angle and what the current angle actually is specified by A (ditto for B and C)
-
-                    // get the current angle for each actuator
-                    ActuatorCoordinates current_angle{
-                        THEKERNEL->robot->actuators[X_AXIS]->get_current_position(),
-                        THEKERNEL->robot->actuators[Y_AXIS]->get_current_position(),
-                        THEKERNEL->robot->actuators[Z_AXIS]->get_current_position()
-                    };
-
-                    //figure out what home_offset needs to be to correct the homing_position
-                    if (gcode->has_letter('A')) {
-                        float a = gcode->get_value('A'); // what actual angle is
-                        home_offset[0] = (a - current_angle[0]);
-                        THEKERNEL->robot->reset_actuator_position(a, NAN, NAN);
-                    }
-                    if (gcode->has_letter('B')) {
-                        float b = gcode->get_value('B');
-                        home_offset[1] = (b - current_angle[1]);
-                        THEKERNEL->robot->reset_actuator_position(NAN, b, NAN);
-                    }
-                    if (gcode->has_letter('C')) {
-                        float c = gcode->get_value('C');
-                        home_offset[2] = (c - current_angle[2]);
-                        THEKERNEL->robot->reset_actuator_position(NAN, NAN, c);
-                    }
-
-                    gcode->stream->printf("Theta Offset: A %8.5f B %8.5f C %8.5f\n", home_offset[0], home_offset[1], home_offset[2]);
+                if (gcode->subcode == 1){
+                    set_relative_homing_offset(gcode);
+                }
+                else {
+                    set_homing_offset(gcode);
                 }
                 break;
 
@@ -917,7 +993,7 @@ void Endstops::on_gcode_received(void *argument)
             case 1910: {
                 // M1910.0 - move specific number of raw steps
                 // M1910.1 - stop any moves
-                // M1910.2 - move specific number of actuator coordinates (usually mm but is degrees for a rotary delta)
+                // M1910.2 - move specific number of actuator units (usually mm but is degrees for a rotary delta)
                 if(gcode->subcode == 0 || gcode->subcode == 2) {
                     // Enable the motors
                     THEKERNEL->stepper->turn_enable_pins_on();

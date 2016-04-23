@@ -33,7 +33,7 @@ class Robot : public Module {
 
         void reset_axis_position(float position, int axis);
         void reset_axis_position(float x, float y, float z);
-        void reset_actuator_position(float a, float b, float c);
+        void reset_actuator_position(const ActuatorCoordinates &ac);
         void reset_position_from_current_actuator_position();
         float get_seconds_per_minute() const { return seconds_per_minute; }
         float get_z_maxfeedrate() const { return this->max_speeds[2]; }
@@ -61,13 +61,15 @@ class Robot : public Module {
         std::function<void(float[3])> compensationTransform;
 
         // Workspace coordinate systems
-        wcs_t mcs2wcs(const float *pos) const;
+        wcs_t mcs2wcs(const wcs_t &pos) const;
+        wcs_t mcs2wcs(const float *pos) const { return mcs2wcs(wcs_t(pos[0], pos[1], pos[2])); }
 
         struct {
             bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
             bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
             bool next_command_is_MCS:1;                       // set by G53
             bool disable_segmentation:1;                      // set to disable segmentation
+            bool segment_z_moves:1;
             uint8_t plane_axis_0:2;                           // Current plane ( XY, XZ, YZ )
             uint8_t plane_axis_1:2;
             uint8_t plane_axis_2:2;
@@ -92,7 +94,7 @@ class Robot : public Module {
         uint8_t current_wcs{0}; // 0 means G54 is enabled this is persistent once saved with M500
         wcs_t g92_offset;
         wcs_t tool_offset; // used for multiple extruders, sets the tool offset for the current extruder applied first
-        std::tuple<float, float, float, uint8_t> last_probe_position;
+        std::tuple<float, float, float, uint8_t> last_probe_position{0,0,0,0};
 
         using saved_state_t= std::tuple<float, float, bool, bool, uint8_t>; // save current feedrate and absolute mode, inch mode, current_wcs
         std::stack<saved_state_t> state_stack;               // saves state from M120
@@ -103,14 +105,14 @@ class Robot : public Module {
         float seek_rate;                                     // Current rate for seeking moves ( mm/s )
         float feed_rate;                                     // Current rate for feeding moves ( mm/s )
         float mm_per_line_segment;                           // Setting : Used to split lines into segments
-        float mm_per_arc_segment;                            // Setting : Used to split arcs into segmentrs
+        float mm_per_arc_segment;                            // Setting : Used to split arcs into segments
         float delta_segments_per_second;                     // Setting : Used to split lines into segments for delta based on speed
         float seconds_per_minute;                            // for realtime speed change
 
         float softlimits[3][2];                              // minimum and maximum movement limits
 
         // Number of arc generation iterations by small angle approximation before exact arc trajectory
-        // correction. This parameter maybe decreased if there are issues with the accuracy of the arc
+        // correction. This parameter may be decreased if there are issues with the accuracy of the arc
         // generations. In general, the default value is more than enough for the intended CNC applications
         // of grbl, and should be on the order or greater than the size of the buffer to help with the
         // computational efficiency of generating arcs.

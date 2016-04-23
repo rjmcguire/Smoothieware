@@ -14,6 +14,7 @@
 #include "modules/tools/endstops/Endstops.h"
 #include "modules/tools/zprobe/ZProbe.h"
 #include "modules/tools/scaracal/SCARAcal.h"
+#include "RotaryDeltaCalibration.h"
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/temperatureswitch/TemperatureSwitch.h"
 #include "modules/tools/drillingcycles/Drillingcycles.h"
@@ -55,6 +56,7 @@
 
 #include "version.h"
 #include "system_LPC17xx.h"
+#include "platform_memory.h"
 
 #include "mbed.h"
 
@@ -134,11 +136,12 @@ void init() {
 
 
     // Create and add main modules
+    kernel->add_module( new(AHB0) Player() );
+
     kernel->add_module( new(AHB0) CurrentControl() );
     kernel->add_module( new(AHB0) KillButton() );
     kernel->add_module( new(AHB0) PlayLed() );
     kernel->add_module( new(AHB0) Endstops() );
-    kernel->add_module( new(AHB0) Player() );
 
 
     // these modules can be completely disabled in the Makefile by adding to EXCLUDE_MODULES
@@ -172,7 +175,10 @@ void init() {
     kernel->add_module( new(AHB0) ZProbe() );
     #endif
     #ifndef NO_TOOLS_SCARACAL
-    kernel->add_module( new SCARAcal() );
+    kernel->add_module( new(AHB0) SCARAcal() );
+    #endif
+    #ifndef NO_TOOLS_ROTARYDELTACALIBRATION
+    kernel->add_module( new RotaryDeltaCalibration() );
     #endif
     #ifndef NONETWORK
     kernel->add_module( new Network() );
@@ -223,13 +229,16 @@ void init() {
 
     kernel->add_module( &u );
 
+    // memory before cache is cleared
+    //SimpleShell::print_mem(kernel->streams);
+
     // clear up the config cache to save some memory
     kernel->config->config_cache_clear();
 
     if(kernel->is_using_leds()) {
-        // set some leds to indicate status... led0 init doe, led1 mainloop running, led2 idle loop running, led3 sdcard ok
+        // set some leds to indicate status... led0 init done, led1 mainloop running, led2 idle loop running, led3 sdcard ok
         leds[0]= 1; // indicate we are done with init
-        leds[3]= sdok?1:0; // 4th led inidicates sdcard is available (TODO maye should indicate config was found)
+        leds[3]= sdok?1:0; // 4th led indicates sdcard is available (TODO maye should indicate config was found)
     }
 
     if(sdok) {

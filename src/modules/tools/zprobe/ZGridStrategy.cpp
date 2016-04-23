@@ -641,6 +641,15 @@ void ZGridStrategy::next_cal(void){
     }
 }
 
+//void ZGridStrategy::grid2circle(void){
+
+
+//}
+
+//void ZGridStrategy::circle2grid(void){
+
+//}
+
 
 void ZGridStrategy::setAdjustFunction(bool on)
 {

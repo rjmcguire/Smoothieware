@@ -845,10 +845,33 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
 // so in those cases the final position is compensated.
 void Robot::reset_axis_position(float x, float y, float z)
 {
+    //float target[3];
+
+
+
     // these are set to the same as compensation was not used to get to the current position
     last_machine_position[X_AXIS]= last_milestone[X_AXIS] = x;
     last_machine_position[Y_AXIS]= last_milestone[Y_AXIS] = y;
     last_machine_position[Z_AXIS]= last_milestone[Z_AXIS] = z;
+
+    // last machine position should actually include compensation if applicable to prevent transform jumping...
+    // check function pointer and call if set to transform the target to compensate for bed
+    if(compensationTransform) {
+        // some compensation strategies can transform XYZ, some just change Z
+        compensationTransform(last_machine_position);
+    }
+/*
+    // unity transform by default
+    memcpy(transformed_target, target, sizeof(transformed_target));
+
+    // check function pointer and call if set to transform the target to compensate for bed
+    if(compensationTransform) {
+        // some compensation strategies can transform XYZ, some just change Z
+        compensationTransform(transformed_target);
+    }
+
+*/
+
 
     // now set the actuator positions to match
     ActuatorCoordinates actuator_pos;

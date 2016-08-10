@@ -35,6 +35,7 @@ class Endstops : public Module{
         void process_home_command(Gcode* gcode);
         void set_homing_offset(Gcode* gcode);
         uint32_t read_endstops(uint32_t dummy);
+        void set_relative_homing_offset(Gcode* gcode);
 
         float homing_position[3];
         float home_offset[3];

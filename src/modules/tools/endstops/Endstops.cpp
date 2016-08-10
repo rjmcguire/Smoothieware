@@ -779,7 +779,7 @@ void Endstops::set_relative_homing_offset(Gcode *gcode)
         THEKERNEL->robot->absolute_mode = false; // needs to be relative mode
         THEKERNEL->robot->on_gcode_received(&gc); // send to robot directly
         // Wait for above to finish
-        THEKERNEL->conveyor->wait_for_empty_queue();
+        THECONVEYOR->wait_for_idle();
         THEKERNEL->robot->pop_state();
     }
 

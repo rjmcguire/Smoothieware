@@ -128,6 +128,7 @@ enum {
 Endstops::Endstops()
 {
     this->status = NOT_HOMING;
+    THEROBOT->arm_solution->homing_active = false;
     home_offset[0] = home_offset[1] = home_offset[2] = 0.0F;
     debounce.fill(0);
 }
@@ -205,6 +206,10 @@ void Endstops::load_config()
     this->alpha_max= THEKERNEL->config->value(alpha_max_travel_checksum)->by_default(alpha_max*2)->as_number();
     this->beta_max= THEKERNEL->config->value(beta_max_travel_checksum)->by_default(beta_max*2)->as_number();
     this->gamma_max= THEKERNEL->config->value(gamma_max_travel_checksum)->by_default(gamma_max*2)->as_number();
+    if (this->is_scara){
+        this->alpha_max += 270;  // 270 degree max homing movement in SCARA
+        this->beta_max += 270;
+    }
 
     this->is_corexy                 =  THEKERNEL->config->value(corexy_homing_checksum)->by_default(false)->as_bool();
     this->is_delta                  =  THEKERNEL->config->value(delta_homing_checksum)->by_default(false)->as_bool();
@@ -604,6 +609,7 @@ void Endstops::process_home_command(Gcode* gcode)
 
     // First wait for the queue to be empty
     THECONVEYOR->wait_for_idle();
+    THEROBOT->arm_solution->homing_active = true;  // Enable polar bots to disable kinematics during homing if required
 
     // deltas, scaras always home Z axis only
     bool home_in_z = this->is_delta || this->is_rdelta || this->is_scara;
@@ -657,7 +663,7 @@ void Endstops::process_home_command(Gcode* gcode)
         }
 
     } else {
-        // they could all home at the same time
+        // they could all home at the same time. Default for SCARA
         home(haxis);
     }
 
@@ -669,7 +675,11 @@ void Endstops::process_home_command(Gcode* gcode)
         return;
     }
 
-    if(home_in_z) { // deltas only
+    THEROBOT->arm_solution->homing_active = false;  // Physical homing completed
+    
+    //After physical homing, set axis
+
+    if(home_in_z || this->is_scara) { // deltas and scaras only
         // Here's where we would have been if the endstops were perfectly trimmed
         // NOTE on a rotary delta home_offset is actuator position in degrees when homed and
         // home_offset is the theta offset for each actuator, so M206 is used to set theta offset for each actuator in degrees

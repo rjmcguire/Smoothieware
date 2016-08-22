@@ -100,10 +100,10 @@ void ZProbe::config_load()
                     found= true;
                     break;
 
-                // case ZGrid_leveling_checksum:
-                //      this->strategies.push_back(new ZGridStrategy(this));
-                //      found= true;
-                //      break;
+                case ZGrid_leveling_checksum:
+                     this->strategies.push_back(new ZGridStrategy(this));
+                     found= true;
+                     break;
 
                 case delta_grid_leveling_strategy_checksum:
                     this->strategies.push_back(new DeltaGridStrategy(this));

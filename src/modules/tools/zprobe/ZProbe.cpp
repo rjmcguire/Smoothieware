@@ -30,7 +30,7 @@
 // strategies we know about
 #include "DeltaCalibrationStrategy.h"
 #include "ThreePointStrategy.h"
-//#include "ZGridStrategy.h"
+#include "ZGridStrategy.h"
 #include "DeltaGridStrategy.h"
 
 #define enable_checksum          CHECKSUM("enable")

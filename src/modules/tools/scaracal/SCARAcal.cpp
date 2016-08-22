@@ -234,9 +234,18 @@ void SCARAcal::on_gcode_received(void *argument)
             break;
 
             case 361: {
-                float target[2] = {90.0F, 130.0F},
+                float target[2],
                       cartesian[3];
-
+                
+                if(gcode->subcode == 1){ // 180 degree condition
+                    target[0] = 180.0F;
+                    target[1] = 225.0F;
+                } else {
+                    target[0] = 90.0F;
+                    target[1] = 130.0F;
+                }
+                gcode->stream->printf("Target: T %f P %f\n", target[0], target[1]);
+                                
                 if(gcode->has_letter('P')) {
                     // Program the current position as target
                     ActuatorCoordinates actuators;

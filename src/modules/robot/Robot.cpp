@@ -69,6 +69,14 @@ using std::string;
 #define  kossel_checksum                     CHECKSUM("kossel")
 #define  morgan_checksum                     CHECKSUM("morgan")
 
+#define  software_limits_checksum            CHECKSUM("software_limits")
+#define  x_axis_min_checksum                 CHECKSUM("x_axis_min")
+#define  x_axis_max_checksum                 CHECKSUM("x_axis_max")
+#define  y_axis_min_checksum                 CHECKSUM("y_axis_min")
+#define  y_axis_max_checksum                 CHECKSUM("y_axis_max")
+#define  z_axis_min_checksum                 CHECKSUM("z_axis_min")
+#define  z_axis_max_checksum                 CHECKSUM("z_axis_max")
+
 // new-style actuator stuff
 #define  actuator_checksum                   CHEKCSUM("actuator")
 
@@ -177,6 +185,14 @@ void Robot::load_config()
     this->max_speeds[X_AXIS]  = THEKERNEL->config->value(x_axis_max_speed_checksum    )->by_default(60000.0F)->as_number() / 60.0F;
     this->max_speeds[Y_AXIS]  = THEKERNEL->config->value(y_axis_max_speed_checksum    )->by_default(60000.0F)->as_number() / 60.0F;
     this->max_speeds[Z_AXIS]  = THEKERNEL->config->value(z_axis_max_speed_checksum    )->by_default(  300.0F)->as_number() / 60.0F;
+
+    this->software_limits       = THEKERNEL->config->value(software_limits_checksum    )->by_default( false )->as_bool();
+    this->softlimits[X_AXIS][0] = THEKERNEL->config->value(software_limits_checksum, x_axis_min_checksum    )->by_default(  0.0F)->as_number();
+    this->softlimits[X_AXIS][1] = THEKERNEL->config->value(software_limits_checksum, x_axis_max_checksum    )->by_default(  0.0F)->as_number();
+    this->softlimits[Y_AXIS][0] = THEKERNEL->config->value(software_limits_checksum, y_axis_min_checksum    )->by_default(  0.0F)->as_number();
+    this->softlimits[Y_AXIS][1] = THEKERNEL->config->value(software_limits_checksum, y_axis_max_checksum    )->by_default(  0.0F)->as_number();
+    this->softlimits[Z_AXIS][0] = THEKERNEL->config->value(software_limits_checksum, z_axis_min_checksum    )->by_default(  0.0F)->as_number();
+    this->softlimits[Z_AXIS][1] = THEKERNEL->config->value(software_limits_checksum, z_axis_max_checksum    )->by_default(  0.0F)->as_number();
 
     this->segment_z_moves     = THEKERNEL->config->value(segment_z_moves_checksum     )->by_default(true)->as_bool();
     this->save_g92            = THEKERNEL->config->value(save_g92_checksum            )->by_default(false)->as_bool();
@@ -789,6 +805,25 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         }
     }
 
+    // Software limits : Limit the castesian movement to:
+    //   ** if last_milestone is within build area limits : the limits of the build area
+    //   ** if last_milestone is outside build area limits (after homing etc.) : no further away from build environment than the last_milestone
+
+    if (this->software_limits == true) {
+       for(char letter = 'X'; letter <= 'Z'; letter++) {
+          if (target[letter - 'X'] < this->softlimits[letter - 'X'][0]){
+             if (target[letter - 'X'] < this->last_milestone[letter - 'X']){
+                target[letter - 'X'] = (this->last_milestone[letter - 'X'] < this->softlimits[letter - 'X'][0])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][0];
+             }
+          }
+          if (target[letter - 'X'] > this->softlimits[letter - 'X'][1]){
+             if (target[letter - 'X'] > this->last_milestone[letter - 'X']){
+                target[letter - 'X'] = (this->last_milestone[letter - 'X'] > this->softlimits[letter - 'X'][1])?this->last_milestone[letter - 'X']:this->softlimits[letter - 'X'][1];
+             }
+          }
+       }
+    }
+
     // process extruder parameters, for active extruder only (only one active extruder at a time)
     selected_extruder= 0;
     if(gcode->has_letter('E')) {
@@ -861,6 +896,13 @@ void Robot::reset_axis_position(float x, float y, float z)
     last_machine_position[X_AXIS]= last_milestone[X_AXIS] = x;
     last_machine_position[Y_AXIS]= last_milestone[Y_AXIS] = y;
     last_machine_position[Z_AXIS]= last_milestone[Z_AXIS] = z;
+
+    // last machine position should actually include compensation if applicable to prevent transform jumping...
+    // check function pointer and call if set to transform the target to compensate for bed
+    if(compensationTransform) {
+        // some compensation strategies can transform XYZ, some just change Z
+        compensationTransform(last_machine_position);
+    }
 
     // now set the actuator positions to match
     ActuatorCoordinates actuator_pos;

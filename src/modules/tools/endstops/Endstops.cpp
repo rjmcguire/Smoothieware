@@ -206,17 +206,19 @@ void Endstops::load_config()
     this->alpha_max= THEKERNEL->config->value(alpha_max_travel_checksum)->by_default(alpha_max*2)->as_number();
     this->beta_max= THEKERNEL->config->value(beta_max_travel_checksum)->by_default(beta_max*2)->as_number();
     this->gamma_max= THEKERNEL->config->value(gamma_max_travel_checksum)->by_default(gamma_max*2)->as_number();
-    if (this->is_scara){
-        this->alpha_max += 270;  // 270 degree max homing movement in SCARA
-        this->beta_max += 270;
-    }
 
     this->is_corexy                 =  THEKERNEL->config->value(corexy_homing_checksum)->by_default(false)->as_bool();
     this->is_delta                  =  THEKERNEL->config->value(delta_homing_checksum)->by_default(false)->as_bool();
     this->is_rdelta                 =  THEKERNEL->config->value(rdelta_homing_checksum)->by_default(false)->as_bool();
     this->is_scara                  =  THEKERNEL->config->value(scara_homing_checksum)->by_default(false)->as_bool();
 
-    this->home_z_first              = THEKERNEL->config->value(home_z_first_checksum)->by_default(false)->as_bool();
+    if (this->is_scara){
+        this->home_z_first              = THEKERNEL->config->value(home_z_first_checksum)->by_default(true)->as_bool();
+        this->alpha_max += 270;  // 270 degree max homing movement in SCARA
+        this->beta_max += 270;
+    } else
+        this->home_z_first              = THEKERNEL->config->value(home_z_first_checksum)->by_default(false)->as_bool();
+
 
     // see if an order has been specified, must be three characters, XYZ or YXZ etc
     string order = THEKERNEL->config->value(homing_order_checksum)->by_default("")->as_string();
@@ -637,7 +639,7 @@ void Endstops::process_home_command(Gcode* gcode)
     }
 
     // do the actual homing
-    if(homing_order != 0) {
+    if(homing_order != 0 && !this->is_scara) {
         // if an order has been specified do it in the specified order
         // homing order is 0b00ccbbaa where aa is 0,1,2 to specify the first axis, bb is the second and cc is the third
         // eg 0b00100001 would be Y X Z, 0b00100100 would be X Y Z

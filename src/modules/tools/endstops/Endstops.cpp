@@ -611,8 +611,8 @@ void Endstops::process_home_command(Gcode* gcode)
     THECONVEYOR->wait_for_idle();
     THEROBOT->arm_solution->homing_active = true;  // Enable polar bots to disable kinematics during homing if required
 
-    // deltas, scaras always home Z axis only
-    bool home_in_z = this->is_delta || this->is_rdelta || this->is_scara;
+    // deltas always home Z axis only
+    bool home_in_z = this->is_delta || this->is_rdelta;
 
     // figure out which axis to home
     bitset<3> haxis;

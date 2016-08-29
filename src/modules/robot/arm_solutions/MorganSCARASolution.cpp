@@ -10,6 +10,8 @@
 
 #include "libs/Config.h"
 
+#include "Robot.h"
+
 #define arm1_length_checksum          CHECKSUM("arm1_length")
 #define arm2_length_checksum          CHECKSUM("arm2_length")
 #define morgan_offset_x_checksum      CHECKSUM("morgan_offset_x")
@@ -58,7 +60,7 @@ float MorganSCARASolution::to_degrees(float radians) const
 
 void MorganSCARASolution::cartesian_to_actuator(const float cartesian_mm[], ActuatorCoordinates &actuator_mm ) const
 {
-  if (!this->homing_active){
+  if (!THEROBOT->disable_arm_solution){
     float SCARA_pos[2],
           SCARA_C2,
           SCARA_S2,
@@ -109,7 +111,7 @@ void MorganSCARASolution::cartesian_to_actuator(const float cartesian_mm[], Actu
 void MorganSCARASolution::actuator_to_cartesian(const ActuatorCoordinates &actuator_mm, float cartesian_mm[] ) const
 {
     // Perform forward kinematics, and place results in cartesian_mm[]
-  if(!this->homing_active){
+  if (!THEROBOT->disable_arm_solution){
     float y1, y2,
           actuator_rad[2];
 

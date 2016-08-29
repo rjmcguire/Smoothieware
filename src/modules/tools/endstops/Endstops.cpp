@@ -128,7 +128,7 @@ enum {
 Endstops::Endstops()
 {
     this->status = NOT_HOMING;
-    THEROBOT->arm_solution->homing_active = false;
+    THEROBOT->disable_arm_solution = false;
     home_offset[0] = home_offset[1] = home_offset[2] = 0.0F;
     debounce.fill(0);
 }
@@ -613,6 +613,11 @@ void Endstops::process_home_command(Gcode* gcode)
     THECONVEYOR->wait_for_idle();
     THEROBOT->arm_solution->homing_active = true;  // Enable polar bots to disable kinematics during homing if required
 
+    // Disable arm solution for SCARA and some polar bots
+    if (is_scara){
+    	THEROBOT->disable_arm_solution = true;
+    }
+
     // deltas always home Z axis only
     bool home_in_z = this->is_delta || this->is_rdelta;
 
@@ -624,7 +629,7 @@ void Endstops::process_home_command(Gcode* gcode)
         bool axis_speced = ( gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z') );
         // only enable homing if the endstop is defined,
         for ( int c = X_AXIS; c <= Z_AXIS; c++ ) {
-            if (this->pins[c + (this->home_direction[c] ? 0 : 3)].connected() && (!axis_speced || gcode->has_letter(c + 'X')) ) {
+            if ((this->pins[c + (this->home_direction[c] ? 0 : 3)].connected() && (!axis_speced || gcode->has_letter(c + 'X'))) || this->is_scara ) {
                 haxis.set(c);
                 // now reset axis to 0 as we do not know what state we are in
                 THEROBOT->reset_axis_position(0, c);
@@ -651,7 +656,12 @@ void Endstops::process_home_command(Gcode* gcode)
                 home(bs);
             }
             // check if on_halt (eg kill)
-            if(THEKERNEL->is_halted()) break;
+
+            if(THEKERNEL->is_halted()){
+                // make sure arm solution is active before leaving...
+                THEROBOT->disable_arm_solution = false;
+                break;
+            }
         }
 
     } else if(is_corexy) {
@@ -669,6 +679,9 @@ void Endstops::process_home_command(Gcode* gcode)
         home(haxis);
     }
 
+    // Movement done.  Make sure arm_solution is active.
+        THEROBOT->disable_arm_solution = false;
+
     // check if on_halt (eg kill)
     if(THEKERNEL->is_halted()) {
         if(!THEKERNEL->is_grbl_mode()) {
@@ -677,10 +690,6 @@ void Endstops::process_home_command(Gcode* gcode)
         THEROBOT->arm_solution->homing_active = false;
         return;
     }
-
-    THEROBOT->arm_solution->homing_active = false;  // Physical homing completed
-    
-    //After physical homing, set axis
 
     if(home_in_z || this->is_scara) { // deltas and scaras only
         // Here's where we would have been if the endstops were perfectly trimmed

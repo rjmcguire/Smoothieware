@@ -10,6 +10,8 @@
 
 #include "libs/Config.h"
 
+#include "Robot.h"
+
 #define arm1_length_checksum          CHECKSUM("arm1_length")
 #define arm2_length_checksum          CHECKSUM("arm2_length")
 #define morgan_offset_x_checksum      CHECKSUM("morgan_offset_x")
